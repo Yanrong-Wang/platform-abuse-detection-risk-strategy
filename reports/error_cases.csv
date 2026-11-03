@@ -1,0 +1,10 @@
+review_id,label,score,rur_degree,rsr_degree,rtr_degree,total_degree,degree_group,error_type
+33167,0,0.95625,0,218,25,243,Q3,false_positive
+24309,0,0.95625,1,255,37,293,Q4 high,false_positive
+33176,0,0.95625,0,25,28,53,Q1 low,false_positive
+16029,0,0.95625,0,80,33,113,Q2,false_positive
+14296,1,0.0,3,97,13,113,Q2,false_negative
+25070,1,0.0,4,145,38,187,Q3,false_negative
+21525,1,0.0,4,72,40,116,Q2,false_negative
+40559,1,0.0018484288354898336,3,270,43,316,Q4 high,false_negative
+26306,1,0.0018484288354898336,1,100,0,101,Q2,false_negative

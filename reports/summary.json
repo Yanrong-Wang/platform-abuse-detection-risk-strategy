@@ -1,0 +1,35 @@
+{
+  "selected_model": "M3 without RTR",
+  "selected_features": 162,
+  "seed": 42,
+  "test_calibrated": {
+    "pr_auc": 0.8749699312109819,
+    "roc_auc": 0.9670586271448955,
+    "brier": 0.04256583181514234,
+    "precision_at_5pct": 0.9869565217391304,
+    "recall_at_5pct": 0.3398203592814371
+  },
+  "test_raw": {
+    "pr_auc": 0.8881643119771488,
+    "roc_auc": 0.9682534117101845,
+    "brier": 0.043783083846663566,
+    "precision_at_5pct": 0.9956521739130435,
+    "recall_at_5pct": 0.34281437125748504
+  },
+  "graph_vs_original_pr_auc_ci": [
+    0.06097880056046914,
+    0.09809884181789645
+  ],
+  "default_costs": {
+    "false_negative": 1.0,
+    "false_positive": 5.0,
+    "review": 0.15,
+    "review_accuracy": 1.0
+  },
+  "default_thresholds": {
+    "s1_threshold": 0.95625,
+    "s3_low": 0.726027397260274,
+    "s3_high": 0.95625,
+    "capacity_fraction": 0.05
+  }
+}

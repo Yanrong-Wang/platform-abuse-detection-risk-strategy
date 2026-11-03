@@ -1,0 +1,2 @@
+noise_scale_feature_sd,mean_abs_score_change,p95_abs_score_change,share_action_changes_at_0_5,pr_auc_before,pr_auc_after,brier_before,brier_after
+0.01,0.019413915750408357,0.11332762773780293,0.013272410791993037,0.8749699312109819,0.8459046824071851,0.04256583181514234,0.04832936413062988
