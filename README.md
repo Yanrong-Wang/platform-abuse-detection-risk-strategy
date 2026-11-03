@@ -10,7 +10,7 @@ A reproducible offline data science project on the public **YelpChi** review gra
 2. Which relation contributes most, and where does the model make errors?
 3. How do false blocks, missed spam, reviewer accuracy and capacity change the preferred policy?
 
-The selected model was **LightGBM with original features plus R-U-R and R-S-R aggregates**. It was selected on a separate model-validation split; the R-T-R relation was omitted after ablation. On the fixed test split, calibrated PR-AUC was **0.875** and ROC-AUC **0.967**. Under the *illustrative* cost settings (missed spam 1, false block 5, review 0.15, reviewer accuracy 100%, capacity 5%), the strategy-validation-selected budgeted expected-loss policy had **72.5% expected recall**, **0.153% expected FPR**, and **54.0 cost units per 1,000 reviews**. Relative to the original two-threshold policy, it catches 44 more filtered reviews while using 42 more review slots and incorrectly blocking 2 more normal reviews on the fixed test split. **S4 was added after the original test results were inspected, so this comparison is exploratory and needs an independent prospective or external check.** These numbers are properties of this offline split and assumptions, not forecast platform outcomes. See the [technical report](reports/technical_report.md) for full comparisons and limits.
+The selected model was **LightGBM with original features plus R-U-R and R-S-R aggregates**. It was selected on a separate model-validation split; the R-T-R relation was omitted after ablation. On the fixed test split, calibrated PR-AUC was **0.875** and ROC-AUC **0.967**. The decision simulator compares five policies under review-capacity and cost assumptions. In a [15-split audit](reports/repeated_strategy_evaluation.md), the budgeted expected-loss policy had lower simulated cost than the two-threshold baseline in 10/10 node splits and 4/5 R-U-R-group splits with idealized 100% reviewer accuracy; its advantage was inconsistent at 80% accuracy. These are historical offline simulations with hypothetical costs, not measured platform outcomes. See the [technical report](reports/technical_report.md) for the single-split results and limits.
 
 ## Dataset and evaluation boundary
 
@@ -29,6 +29,7 @@ pip install -e '.[dev]'
 python scripts/download_data.py
 python -m abuse_risk.run
 python -m abuse_risk.robustness
+python -m abuse_risk.validate_strategy
 python scripts/make_notebooks.py
 pytest -q
 streamlit run dashboard/app.py
@@ -44,14 +45,16 @@ The download script fetches the [CARE-GNN YelpChi archive](https://github.com/Yi
 | `src/abuse_risk/run.py` | split, model comparison, calibration, error analysis, strategies, reports |
 | `src/abuse_risk/strategy.py` | expected cost model, top-K review, threshold optimizer |
 | `src/abuse_risk/robustness.py` | simulated prevalence shift and feature perturbation |
+| `src/abuse_risk/validate_strategy.py` | 10 repeated node splits, 5 R-U-R component group splits, reviewer-quality scenarios |
 | `dashboard/app.py` | risk overview, model evaluation, live strategy simulator, node explorer |
 | `notebooks/` | executable EDA, ablation and error-analysis views |
 | `reports/` | generated results and [robustness analysis](reports/robustness.md) |
+| `docs/resume_evidence.md` | supported resume claims and remaining evidence gap |
 | `tests/` | feature leakage and policy/capacity checks |
 
 ## Strategy model
 
-Let score `p` be the calibrated risk estimate. S0 allows all; S1 blocks above one cutoff; S2 reviews the highest-scored `K` nodes; S3 chooses two cutoffs for allow, review and block. S1 and S3 minimize simulated cost on the strategy-validation split. S3 is constrained so the review band contains no more than the specified fraction of that split. S4 calculates each node's expected loss for allow, block and review, uses the cheaper automatic action as a baseline, then reviews the cases with the largest positive expected cost reduction up to capacity. It uses the full review budget when doing so reduces estimated loss, including within score ties. All policies are compared on strategy validation; the lowest-cost one is selected before looking at test outcomes.
+Let score `p` be the calibrated risk estimate. S0 allows all; S1 blocks above one cutoff; S2 reviews the highest-scored `K` nodes; S3 chooses two cutoffs for allow, review and block. S1 and S3 minimize simulated cost on the strategy-validation split. S3 is constrained so the review band contains no more than the specified fraction of that split. S4 calculates each node's expected loss for allow, block and review, uses the cheaper automatic action as a baseline, then reviews the cases with the largest positive expected cost reduction up to capacity. It uses the full review budget when doing so reduces estimated loss, including within score ties. All policies are compared on strategy validation; the lowest-cost one is selected within each run. S4 was designed after the first test had been inspected, so its comparisons remain exploratory.
 
 The cost model is `c_FN × expected missed spam + c_FP × expected false blocks + c_review × reviewed nodes`. Reviewer accuracy `q` is modeled as symmetric: a reviewed spam item is missed with probability `1−q`, and a reviewed normal item is incorrectly blocked with probability `1−q`. This is a simplifying assumption; no real review outcomes are available. All costs are unitless and hypothetical.
 
@@ -60,6 +63,8 @@ The dashboard recomputes S1/S3 cutoffs on strategy validation when sliders chang
 ## Main evidence and limitations
 
 The raw all-graph LightGBM beat raw original-feature LightGBM by **0.076 PR-AUC** on this test split; a paired node bootstrap gives a 95% interval of **[0.061, 0.098]**. R-U-R is especially useful in the ablation table. Calibration improved Brier score for the selected model, while isotonic ties reduced PR-AUC from **0.888 raw** to **0.875 calibrated**. Error rates by graph degree and relation ablations are in the technical report. The [robustness note](reports/robustness.md) shows that even 1% feature noise changed PR-AUC in one simulation, so scores should not be treated as invariant.
+
+The [repeated strategy audit](reports/repeated_strategy_evaluation.md) refits the frozen selected model on 10 node splits and 5 R-U-R-component group splits. Under the idealized 100% reviewer-accuracy assumption, S4 has lower simulated cost than S3 in 10/10 node splits and 4/5 group splits. At 80% reviewer accuracy, this advantage is not stable. The repeated tests share one historical graph and do not establish prospective impact; see the [resume evidence note](docs/resume_evidence.md) before quoting results.
 
 Yelp's filtering flag may contain errors, graph-connected nodes weaken independent bootstrap assumptions, and the full transductive graph is visible during scoring. The benchmark cannot establish performance on future reviews, unseen users, or real operational cost. Automatic blocking in a real platform would need independent labels, prospective evaluation, reviewer data, appeal monitoring and human governance.
 
