@@ -8,7 +8,7 @@ Source: [CARE-GNN data repository](https://github.com/YingtongDou/CARE-GNN). SHA
 
 ## Protocol
 
-Stratified node split, seed 42: train 25,274, model selection 6,893, calibration 4,595, strategy selection 4,596, untouched test 4,596. The graph setting is **transductive**: features and edges for all nodes are visible, but labels outside the relevant training or validation split are never model inputs. There is no time-based or new-user generalization claim. Model hyperparameters are fixed; winner selected by validation PR-AUC. Isotonic calibration uses the separate calibration split. Thresholds use the separate strategy split. The test set is only used for final offline reporting.
+Stratified node split, seed 42: train 25,274, model selection 6,893, calibration 4,595, strategy selection 4,596, fixed test 4,596. The graph setting is **transductive**: features and edges for all nodes are visible, but labels outside the relevant training or validation split are never model inputs. There is no time-based or new-user generalization claim. Model hyperparameters are fixed; winner selected by validation PR-AUC. Isotonic calibration uses the separate calibration split. Thresholds use the separate strategy split. **S4 was added after the first test results had been inspected; its comparison on this fixed test split is exploratory, not a fresh confirmatory test.**
 
 ## Data quality and graph exploration
 
@@ -50,17 +50,18 @@ Selected: **M3 without RTR**. Calibrated test PR-AUC 0.875, ROC-AUC 0.967, Brier
 
 ## Risk decisions and business assumptions
 
-Actions: allow, human review, or block. Base costs are hypothetical: false negative 1, false positive 5, review 0.15, reviewer accuracy 100%, capacity 5% of reviews. Reviewed positives missed and reviewed negatives incorrectly blocked are counted in expectation when reviewer accuracy is below 100%. S1 and S3 cutoffs are optimized on strategy validation; S2 reviews the highest-scored 5%. **No test labels are used to tune thresholds.**
+Actions: allow, human review, or block. Base costs are hypothetical: false negative 1, false positive 5, review 0.15, reviewer accuracy 100%, capacity 5% of reviews. Reviewed positives missed and reviewed negatives incorrectly blocked are counted in expectation when reviewer accuracy is below 100%. S1 and S3 cutoffs are optimized on strategy validation; S2 reviews the highest-scored 5%. S4 first chooses the cheaper automatic action for each calibrated score, then assigns reviews to nodes with the largest positive reduction in expected loss, up to the capacity. This exactly optimizes **estimated** additive loss under the stated probability and reviewer assumptions; it does not use labels to assign actions. Cutoffs and the stated cost-based policy choice use strategy-validation labels, not test labels. The policy with lowest strategy-validation cost is **S4 budgeted expected loss**; see [`strategy_selection.csv`](strategy_selection.csv). Because S4 was added after the original test report, its test performance is exploratory.
 
-| Policy | Review | Block | Expected recall | Expected FPR | Cost / 1,000 |
-|:--|--:|--:|--:|--:|--:|
-| S0 allow all | 0 | 0 | 0.000 | 0.000 | 145.34 |
-| S1 block threshold | 0 | 304 | 0.449 | 0.001 | 84.42 |
-| S2 top-K review | 229 | 0 | 0.338 | 0.000 | 103.64 |
-| S3 allow/review/block | 187 | 304 | 0.659 | 0.001 | 60.06 |
+| Policy | Review | Block | Expected recall | Expected FPR | Strategy-val cost / 1,000 | Test cost / 1,000 |
+|:--|--:|--:|--:|--:|--:|--:|
+| S0 allow all | 0 | 0 | 0.0% | 0.000% | 145.13 | 145.34 |
+| S1 block threshold | 0 | 304 | 44.9% | 0.102% | 85.51 | 84.42 |
+| S2 top-K review | 229 | 0 | 33.8% | 0.000% | 103.64 | 103.64 |
+| S3 allow/review/block | 187 | 304 | 65.9% | 0.102% | 63.93 | 60.06 |
+| S4 budgeted expected loss | 229 | 349 | 72.5% | 0.153% | 63.39 | 54.04 |
 
 
-At the base assumptions, S3 lowers simulated cost by 85.28 cost units per 1,000 reviews versus allowing all. This is an **offline cost proxy**, not measured dollars or a production impact estimate. See [`strategy_sensitivity.csv`](strategy_sensitivity.csv) for capacities 2/5/10%, false-positive cost ratios 1/5/10, and reviewer accuracies 100/90/80%.
+At the base assumptions, S4 improves test expected recall by 0.066 versus S3 and lowers simulated cost by 6.03 cost units per 1,000 reviews. It reviews 42 more nodes and has 2 more false blocks. Its expected FPR is 0.153%, versus 0.102% for S3. S4 lowers simulated cost by 91.31 cost units per 1,000 reviews versus allowing all. This is an **exploratory offline cost proxy**, not measured dollars or a production impact estimate. See [`strategy_sensitivity.csv`](strategy_sensitivity.csv) for capacities 2/5/10%, false-positive cost ratios 1/5/10, and reviewer accuracies 100/90/80%. S4 relies on probability calibration and the assumed symmetric reviewer accuracy; score ties use deterministic input order.
 
 ## Error analysis and robustness
 

@@ -69,7 +69,7 @@ with evaluation:
     st.image(str(ROOT / "reports/model_curves.png"), caption="Held-out PR, ROC and reliability curves")
 
 with simulator:
-    st.write("Change the assumptions. Thresholds are re-optimized on the **strategy-validation** split, then evaluated on the **held-out test** split.")
+    st.write("Change the assumptions. S1/S3 thresholds are re-optimized on the **strategy-validation** split; S4 allocates reviews by per-case expected loss. All policies are then evaluated on the **fixed test** split. S4's comparison is exploratory because it was added after initial test inspection.")
     left, right = st.columns(2)
     with left:
         capacity = st.slider("Review capacity (% of reviews)", 0, 20, 5, 1) / 100
@@ -81,8 +81,11 @@ with simulator:
     strategy = output["strategy"]
     test = output["test"]
     cuts = optimize(strategy.label.to_numpy(), strategy.score.to_numpy(), costs, capacity, grid_size=35)
+    validation_results = compare_policies(strategy.label.to_numpy(), strategy.score.to_numpy(), costs, capacity, cuts)
+    selected_policy = min(validation_results, key=lambda name: validation_results[name]["cost"])
     results = compare_policies(test.label.to_numpy(), test.score.to_numpy(), costs, capacity, cuts)
     comparison = pd.DataFrame([{"policy": name, **value} for name, value in results.items()])
+    st.write(f"Lowest simulated cost on strategy validation: **{selected_policy}**")
     st.dataframe(comparison[["policy", "allow", "review", "block", "expected_recall", "expected_fpr", "cost_per_1000"]].style.format({"expected_recall": "{:.1%}", "expected_fpr": "{:.2%}", "cost_per_1000": "{:.1f}"}), hide_index=True, width="stretch")
     st.plotly_chart(px.bar(comparison, x="policy", y="cost_per_1000", title="Simulated cost per 1,000 reviews"), width="stretch")
     st.caption(f"Chosen cutoffs: S1 = {cuts['s1_threshold']:.3f}; S3 allow < {cuts['s3_low']:.3f}, review below {cuts['s3_high']:.3f}, block at or above it. Review outcomes are expected values at the selected accuracy.")

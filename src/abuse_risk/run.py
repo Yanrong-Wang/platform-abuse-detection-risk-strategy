@@ -156,7 +156,9 @@ def run(raw: Path, seed: int = 42):
     costs = Costs()
     thresholds = optimize(data.y[indices["strategy_val"]], p_strategy, costs, 0.05)
     _write_json(ROOT / "artifacts/default_thresholds.json", thresholds)
+    comparison_val = compare_policies(data.y[indices["strategy_val"]], p_strategy, costs, 0.05, thresholds)
     comparison = compare_policies(data.y[indices["test"]], p_test, costs, 0.05, thresholds)
+    pd.DataFrame([{"policy": name, **values} for name, values in comparison_val.items()]).to_csv(ROOT / "reports/strategy_selection.csv", index=False)
     pd.DataFrame([{"policy": name, **metrics} for name, metrics in comparison.items()]).to_csv(ROOT / "reports/strategy_comparison.csv", index=False)
     sensitivity = []
     for capacity in [0.02, 0.05, 0.10]:
@@ -205,20 +207,23 @@ def run(raw: Path, seed: int = 42):
     plt.close(fig)
 
     metrics = {"selected_model": winner, "selected_features": len(cols), "seed": seed,
+               "selected_policy": min(comparison_val, key=lambda name: comparison_val[name]["cost"]),
+               "strategy_comparison_status": "exploratory_after_initial_test_inspection",
                "test_calibrated": ranking_metrics(data.y[indices["test"]], p_test),
                "test_raw": ranking_metrics(data.y[indices["test"]], test_predictions[winner]),
                "graph_vs_original_pr_auc_ci": bootstrap_pr_difference(data.y[indices["test"]],
                    test_predictions["M2 LightGBM all graph"], test_predictions["M1 LightGBM original"], seed),
                "default_costs": costs.__dict__, "default_thresholds": thresholds}
     _write_json(ROOT / "reports/summary.json", metrics)
-    build_report(quality, rel, val_df, test_df, comparison, metrics)
+    build_report(quality, rel, val_df, test_df, comparison_val, comparison, metrics)
     print(f"Done. Selected {winner}; test PR-AUC {metrics['test_calibrated']['pr_auc']:.3f}", flush=True)
 
 
-def build_report(quality, rel, val_df, test_df, comparison, metrics):
+def build_report(quality, rel, val_df, test_df, comparison_val, comparison, metrics):
     p = ROOT / "reports/technical_report.md"
     winner = metrics["selected_model"]
     s3 = comparison["S3 allow/review/block"]
+    s4 = comparison["S4 budgeted expected loss"]
     s0 = comparison["S0 allow all"]
     ci = metrics["graph_vs_original_pr_auc_ci"]
     content = f"""# YelpChi offline abuse risk study
@@ -231,7 +236,7 @@ Source: [CARE-GNN data repository](https://github.com/YingtongDou/CARE-GNN). SHA
 
 ## Protocol
 
-Stratified node split, seed {metrics['seed']}: train {quality['split_counts']['train']:,}, model selection {quality['split_counts']['model_val']:,}, calibration {quality['split_counts']['calibration']:,}, strategy selection {quality['split_counts']['strategy_val']:,}, untouched test {quality['split_counts']['test']:,}. The graph setting is **transductive**: features and edges for all nodes are visible, but labels outside the relevant training or validation split are never model inputs. There is no time-based or new-user generalization claim. Model hyperparameters are fixed; winner selected by validation PR-AUC. Isotonic calibration uses the separate calibration split. Thresholds use the separate strategy split. The test set is only used for final offline reporting.
+Stratified node split, seed {metrics['seed']}: train {quality['split_counts']['train']:,}, model selection {quality['split_counts']['model_val']:,}, calibration {quality['split_counts']['calibration']:,}, strategy selection {quality['split_counts']['strategy_val']:,}, fixed test {quality['split_counts']['test']:,}. The graph setting is **transductive**: features and edges for all nodes are visible, but labels outside the relevant training or validation split are never model inputs. There is no time-based or new-user generalization claim. Model hyperparameters are fixed; winner selected by validation PR-AUC. Isotonic calibration uses the separate calibration split. Thresholds use the separate strategy split. **S4 was added after the first test results had been inspected; its comparison on this fixed test split is exploratory, not a fresh confirmatory test.**
 
 ## Data quality and graph exploration
 
@@ -255,16 +260,16 @@ Selected: **{winner}**. Calibrated test PR-AUC {metrics['test_calibrated']['pr_a
 
 ## Risk decisions and business assumptions
 
-Actions: allow, human review, or block. Base costs are hypothetical: false negative 1, false positive 5, review 0.15, reviewer accuracy 100%, capacity 5% of reviews. Reviewed positives missed and reviewed negatives incorrectly blocked are counted in expectation when reviewer accuracy is below 100%. S1 and S3 cutoffs are optimized on strategy validation; S2 reviews the highest-scored 5%. **No test labels are used to tune thresholds.**
+Actions: allow, human review, or block. Base costs are hypothetical: false negative 1, false positive 5, review 0.15, reviewer accuracy 100%, capacity 5% of reviews. Reviewed positives missed and reviewed negatives incorrectly blocked are counted in expectation when reviewer accuracy is below 100%. S1 and S3 cutoffs are optimized on strategy validation; S2 reviews the highest-scored 5%. S4 first chooses the cheaper automatic action for each calibrated score, then assigns reviews to nodes with the largest positive reduction in expected loss, up to the capacity. This exactly optimizes **estimated** additive loss under the stated probability and reviewer assumptions; it does not use labels to assign actions. Cutoffs and the stated cost-based policy choice use strategy-validation labels, not test labels. The policy with lowest strategy-validation cost is **{metrics['selected_policy']}**; see [`strategy_selection.csv`](strategy_selection.csv). Because S4 was added after the original test report, its test performance is exploratory.
 
-| Policy | Review | Block | Expected recall | Expected FPR | Cost / 1,000 |
-|:--|--:|--:|--:|--:|--:|
+| Policy | Review | Block | Expected recall | Expected FPR | Strategy-val cost / 1,000 | Test cost / 1,000 |
+|:--|--:|--:|--:|--:|--:|--:|
 """
     for name, r in comparison.items():
-        content += f"| {name} | {r['review']} | {r['block']} | {r['expected_recall']:.3f} | {r['expected_fpr']:.3f} | {r['cost_per_1000']:.2f} |\n"
+        content += f"| {name} | {r['review']} | {r['block']} | {r['expected_recall']:.1%} | {r['expected_fpr']:.3%} | {comparison_val[name]['cost_per_1000']:.2f} | {r['cost_per_1000']:.2f} |\n"
     content += f"""
 
-At the base assumptions, S3 lowers simulated cost by {(s0['cost_per_1000'] - s3['cost_per_1000']):.2f} cost units per 1,000 reviews versus allowing all. This is an **offline cost proxy**, not measured dollars or a production impact estimate. See [`strategy_sensitivity.csv`](strategy_sensitivity.csv) for capacities 2/5/10%, false-positive cost ratios 1/5/10, and reviewer accuracies 100/90/80%.
+At the base assumptions, S4 improves test expected recall by {(s4['expected_recall'] - s3['expected_recall']):.3f} versus S3 and lowers simulated cost by {(s3['cost_per_1000'] - s4['cost_per_1000']):.2f} cost units per 1,000 reviews. It reviews {s4['review'] - s3['review']} more nodes and has {s4['expected_fp'] - s3['expected_fp']:.0f} more false blocks. Its expected FPR is {s4['expected_fpr']:.3%}, versus {s3['expected_fpr']:.3%} for S3. S4 lowers simulated cost by {(s0['cost_per_1000'] - s4['cost_per_1000']):.2f} cost units per 1,000 reviews versus allowing all. This is an **exploratory offline cost proxy**, not measured dollars or a production impact estimate. See [`strategy_sensitivity.csv`](strategy_sensitivity.csv) for capacities 2/5/10%, false-positive cost ratios 1/5/10, and reviewer accuracies 100/90/80%. S4 relies on probability calibration and the assumed symmetric reviewer accuracy; score ties use deterministic input order.
 
 ## Error analysis and robustness
 

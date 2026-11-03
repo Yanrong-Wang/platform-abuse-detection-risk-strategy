@@ -52,6 +52,33 @@ def top_k_actions(p, fraction):
     return actions
 
 
+def budgeted_expected_loss_actions(p, costs: Costs, capacity_fraction: float):
+    """Assign reviews with the largest positive expected cost reduction.
+
+    Each node first receives its cheaper automatic action. A review replaces
+    that action only when its estimated cost reduction is positive, and only
+    for the best ``floor(n * capacity_fraction)`` candidates. With independent
+    per-node losses and calibrated probabilities, this minimizes estimated
+    total cost subject to the review-capacity constraint. Ties retain input
+    order; no labels are inspected.
+    """
+    if not 0 <= capacity_fraction <= 1:
+        raise ValueError("capacity_fraction must be in [0,1]")
+    p = np.asarray(p, dtype=float)
+    if not np.isfinite(p).all() or ((p < 0) | (p > 1)).any():
+        raise ValueError("Scores must be finite probabilities in [0,1]")
+    allow_loss = p * costs.false_negative
+    block_loss = (1 - p) * costs.false_positive
+    review_loss = costs.review + (1 - costs.review_accuracy) * (allow_loss + block_loss)
+    actions = np.where(block_loss < allow_loss, 2, 0).astype(np.int8)
+    benefit = np.minimum(allow_loss, block_loss) - review_loss
+    capacity = min(len(p), int(np.floor(len(p) * capacity_fraction)))
+    if capacity:
+        candidates = np.argsort(-benefit, kind="stable")[:capacity]
+        actions[candidates[benefit[candidates] > 0]] = 1
+    return actions
+
+
 def optimize(y, p, costs: Costs, capacity_fraction: float, grid_size: int = 60):
     """Select S1 and S3 cutoffs on a strategy-validation split only."""
     if not 0 <= capacity_fraction <= 1:
@@ -81,5 +108,6 @@ def compare_policies(y, p, costs: Costs, capacity_fraction: float, thresholds):
     policies = {"S0 allow all": np.zeros(len(p), dtype=np.int8),
                 "S1 block threshold": actions_from_thresholds(p, thresholds["s1_threshold"], thresholds["s1_threshold"]),
                 "S2 top-K review": top_k_actions(p, capacity_fraction),
-                "S3 allow/review/block": actions_from_thresholds(p, thresholds["s3_low"], thresholds["s3_high"])}
+                "S3 allow/review/block": actions_from_thresholds(p, thresholds["s3_low"], thresholds["s3_high"]),
+                "S4 budgeted expected loss": budgeted_expected_loss_actions(p, costs, capacity_fraction)}
     return {name: evaluate(y, action, costs) for name, action in policies.items()}

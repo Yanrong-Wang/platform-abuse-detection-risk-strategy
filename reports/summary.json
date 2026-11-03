@@ -2,6 +2,8 @@
   "selected_model": "M3 without RTR",
   "selected_features": 162,
   "seed": 42,
+  "selected_policy": "S4 budgeted expected loss",
+  "strategy_comparison_status": "exploratory_after_initial_test_inspection",
   "test_calibrated": {
     "pr_auc": 0.8749699312109819,
     "roc_auc": 0.9670586271448955,
