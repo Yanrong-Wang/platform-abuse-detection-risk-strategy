@@ -49,7 +49,6 @@ The download script fetches the [CARE-GNN YelpChi archive](https://github.com/Yi
 | `dashboard/app.py` | risk overview, model evaluation, live strategy simulator, node explorer |
 | `notebooks/` | executable EDA, ablation and error-analysis views |
 | `reports/` | generated results and [robustness analysis](reports/robustness.md) |
-| `docs/resume_evidence.md` | supported resume claims and remaining evidence gap |
 | `tests/` | feature leakage and policy/capacity checks |
 
 ## Strategy model
@@ -64,7 +63,7 @@ The dashboard recomputes S1/S3 cutoffs on strategy validation when sliders chang
 
 The raw all-graph LightGBM beat raw original-feature LightGBM by **0.076 PR-AUC** on this test split; a paired node bootstrap gives a 95% interval of **[0.061, 0.098]**. R-U-R is especially useful in the ablation table. Calibration improved Brier score for the selected model, while isotonic ties reduced PR-AUC from **0.888 raw** to **0.875 calibrated**. Error rates by graph degree and relation ablations are in the technical report. The [robustness note](reports/robustness.md) shows that even 1% feature noise changed PR-AUC in one simulation, so scores should not be treated as invariant.
 
-The [repeated strategy audit](reports/repeated_strategy_evaluation.md) refits the frozen selected model on 10 node splits and 5 R-U-R-component group splits. Under the idealized 100% reviewer-accuracy assumption, S4 has lower simulated cost than S3 in 10/10 node splits and 4/5 group splits. At 80% reviewer accuracy, this advantage is not stable. The repeated tests share one historical graph and do not establish prospective impact; see the [resume evidence note](docs/resume_evidence.md) before quoting results.
+The [repeated strategy audit](reports/repeated_strategy_evaluation.md) refits the frozen selected model on 10 node splits and 5 R-U-R-component group splits. Under the idealized 100% reviewer-accuracy assumption, S4 has lower simulated cost than S3 in 10/10 node splits and 4/5 group splits. At 80% reviewer accuracy, this advantage is not stable. The repeated tests share one historical graph and do not establish prospective impact.
 
 Yelp's filtering flag may contain errors, graph-connected nodes weaken independent bootstrap assumptions, and the full transductive graph is visible during scoring. The benchmark cannot establish performance on future reviews, unseen users, or real operational cost. Automatic blocking in a real platform would need independent labels, prospective evaluation, reviewer data, appeal monitoring and human governance.
 
