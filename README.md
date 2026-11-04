@@ -10,13 +10,13 @@ A reproducible offline data science project on the public **YelpChi** review gra
 2. Which relation contributes most, and where does the model make errors?
 3. How do false blocks, missed spam, reviewer accuracy and capacity change the preferred policy?
 
-The selected model was **LightGBM with original features plus R-U-R and R-S-R aggregates**. It was selected on a separate model-validation split; the R-T-R relation was omitted after ablation. On the fixed test split, calibrated PR-AUC was **0.875** and ROC-AUC **0.967**. The decision simulator compares five policies under review-capacity and cost assumptions. In a [15-split audit](reports/repeated_strategy_evaluation.md), the budgeted expected-loss policy had lower simulated cost than the two-threshold baseline in 10/10 node splits and 4/5 R-U-R-group splits with idealized 100% reviewer accuracy; its advantage was inconsistent at 80% accuracy. These are historical offline simulations with hypothetical costs, not measured platform outcomes. See the [technical report](reports/technical_report.md) for the single-split results and limits.
+The selected model was **LightGBM with original features plus R-U-R and R-S-R aggregates**; R-T-R was omitted after ablation. After selecting this architecture, the model is refitted on the training and model-selection subsets, and its risk scores average isotonic and logistic calibration. On the fixed test split, calibrated PR-AUC is **0.897** and ROC-AUC is **0.971**. The decision simulator compares five policies under review-capacity and cost assumptions. In a [30-split paired stability audit](reports/strategy_stability_evaluation.md), this refit/blend pipeline lowered mean simulated S4 cost across all tested reviewer-accuracy and split-type combinations versus the original pipeline. The [technical report](reports/technical_report.md) gives the fixed-split results.
 
 ## Dataset and evaluation boundary
 
 YelpChi contains 45,954 review nodes, 6,677 filtered labels, 32 numeric features, and three relation graphs: R-U-R (same user), R-S-R (same business and star rating), and R-T-R (same business and month). The label is Yelp's filtering flag, used as a **proxy** for suspicious reviews. The distributed graph does not include raw review text, full user profiles, device information, or a usable event timeline. Node IDs are internal row numbers. We do not infer what individual anonymous numeric features mean.
 
-The protocol uses stratified, disjoint **55/15/10/10/10** node splits for training, model selection, calibration, strategy selection, and final test. The setting is **transductive**: graph structure and unlabeled node features are available across splits. Neighbor labels are never model features. Isotonic calibration fits only on the calibration split; cost thresholds fit only on the strategy split. This is neither a time-split nor a new-user evaluation.
+The protocol uses stratified, disjoint **55/15/10/10/10** node splits for training, model selection, calibration, strategy selection, and final test. After model selection, the chosen architecture is refitted on train plus model-selection nodes (70%). The setting is **transductive**: graph structure and unlabeled node features are available across splits. Neighbor labels are never model features. Both calibration models fit only on the calibration split; cost thresholds fit only on the strategy split. This is neither a time-split nor a new-user evaluation.
 
 ## Reproduce locally
 
@@ -30,12 +30,13 @@ python scripts/download_data.py
 python -m abuse_risk.run
 python -m abuse_risk.robustness
 python -m abuse_risk.validate_strategy
+python -m abuse_risk.validate_stability
 python scripts/make_notebooks.py
 pytest -q
 streamlit run dashboard/app.py
 ```
 
-The download script fetches the [CARE-GNN YelpChi archive](https://github.com/YingtongDou/CARE-GNN/tree/master/data), checks SHA-256 of the zip and extracted `.mat`, and keeps raw files out of Git. Model binaries and raw/processed data are also ignored. Running the pipeline writes CSV/PNG/Markdown reports and score files used by the dashboard. It takes roughly a minute on a laptop, depending on hardware.
+The download script fetches the [CARE-GNN YelpChi archive](https://github.com/YingtongDou/CARE-GNN/tree/master/data), checks SHA-256 of the zip and extracted `.mat`, and keeps raw files out of Git. Model binaries and raw/processed data are also ignored. Running the pipeline writes CSV/PNG/Markdown reports and score files used by the dashboard. The repeated audits take several minutes, depending on hardware.
 
 ## Project map
 
@@ -43,9 +44,11 @@ The download script fetches the [CARE-GNN YelpChi archive](https://github.com/Yi
 |---|---|
 | `src/abuse_risk/data.py` | `.mat` loader, validation, label-free graph feature pipeline, relation EDA |
 | `src/abuse_risk/run.py` | split, model comparison, calibration, error analysis, strategies, reports |
+| `src/abuse_risk/calibration.py` | isotonic/logistic probability blend |
 | `src/abuse_risk/strategy.py` | expected cost model, top-K review, threshold optimizer |
 | `src/abuse_risk/robustness.py` | simulated prevalence shift and feature perturbation |
 | `src/abuse_risk/validate_strategy.py` | 10 repeated node splits, 5 R-U-R component group splits, reviewer-quality scenarios |
+| `src/abuse_risk/validate_stability.py` | 30 paired splits comparing original and refit/blend S4 pipelines |
 | `dashboard/app.py` | risk overview, model evaluation, live strategy simulator, node explorer |
 | `notebooks/` | executable EDA, ablation and error-analysis views |
 | `reports/` | generated results and [robustness analysis](reports/robustness.md) |
@@ -61,9 +64,11 @@ The dashboard recomputes S1/S3 cutoffs on strategy validation when sliders chang
 
 ## Main evidence and limitations
 
-The raw all-graph LightGBM beat raw original-feature LightGBM by **0.076 PR-AUC** on this test split; a paired node bootstrap gives a 95% interval of **[0.061, 0.098]**. R-U-R is especially useful in the ablation table. Calibration improved Brier score for the selected model, while isotonic ties reduced PR-AUC from **0.888 raw** to **0.875 calibrated**. Error rates by graph degree and relation ablations are in the technical report. The [robustness note](reports/robustness.md) shows that even 1% feature noise changed PR-AUC in one simulation, so scores should not be treated as invariant.
+The raw all-graph LightGBM beat raw original-feature LightGBM by **0.076 PR-AUC** on this test split; a paired node bootstrap gives a 95% interval of **[0.061, 0.098]**. R-U-R is especially useful in the ablation table. Refit/blend calibration improved the selected model's Brier score from **0.042 raw** to **0.040 calibrated**. Error rates by graph degree and relation ablations are in the technical report. The [robustness note](reports/robustness.md) shows that even 1% feature noise changes PR-AUC in one simulation.
 
-The [repeated strategy audit](reports/repeated_strategy_evaluation.md) refits the frozen selected model on 10 node splits and 5 R-U-R-component group splits. Under the idealized 100% reviewer-accuracy assumption, S4 has lower simulated cost than S3 in 10/10 node splits and 4/5 group splits. At 80% reviewer accuracy, this advantage is not stable. The repeated tests share one historical graph and do not establish prospective impact.
+The [original strategy audit](reports/repeated_strategy_evaluation.md) compares S3 and S4 with the earlier scoring pipeline on 10 node splits and 5 R-U-R-component group splits. At 80% reviewer accuracy, S4's advantage over S3 was inconsistent.
+
+The [stability audit](reports/strategy_stability_evaluation.md) compares the original S4 scoring pipeline against refit/blend on the same test nodes across 20 node splits and 10 R-U-R-group splits. In the fixed-check batch, mean simulated cost improves at **80%, 90%, and 100%** reviewer accuracy for both split types; at 80%, it improves in 9/10 node splits and 5/5 group splits. With the improved scores, S4 and S3 have nearly equal mean cost at 80%, so the stronger result is the scoring-pipeline improvement, not a universal S4 policy win. Mean group-split recall at 90% falls by 1.1 percentage points while false positives fall. Development and check partitions share the same source graph.
 
 Yelp's filtering flag may contain errors, graph-connected nodes weaken independent bootstrap assumptions, and the full transductive graph is visible during scoring. The benchmark cannot establish performance on future reviews, unseen users, or real operational cost. Automatic blocking in a real platform would need independent labels, prospective evaluation, reviewer data, appeal monitoring and human governance.
 

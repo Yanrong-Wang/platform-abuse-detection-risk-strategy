@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import pointbiserialr
-from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (ConfusionMatrixDisplay, PrecisionRecallDisplay,
                              RocCurveDisplay, average_precision_score)
@@ -24,6 +23,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from .data import load_yelp, make_features, relation_summary
+from .calibration import BlendedCalibrator
 from .metrics import ranking_metrics
 from .strategy import Costs, compare_policies, optimize
 
@@ -127,8 +127,11 @@ def run(raw: Path, seed: int = 42):
     val_df = pd.DataFrame(val_rows).sort_values("pr_auc", ascending=False)
     val_df.to_csv(ROOT / "reports/model_selection.csv", index=False)
     winner = str(val_df.iloc[0]["model"])
-    model, cols = fitted[winner]
-    calibration = IsotonicRegression(out_of_bounds="clip")
+    _, cols = fitted[winner]
+    refit_ids = np.r_[indices["train"], indices["model_val"]]
+    model = _model(winner, seed)
+    model.fit(features.iloc[refit_ids][cols], data.y[refit_ids])
+    calibration = BlendedCalibrator()
     p_cal_raw = model.predict_proba(features.iloc[indices["calibration"]][cols])[:, 1]
     calibration.fit(p_cal_raw, data.y[indices["calibration"]])
 
@@ -138,11 +141,14 @@ def run(raw: Path, seed: int = 42):
         test_predictions[name] = raw_test
         test_rows.append({"model": name, "feature_count": len(candidate_cols),
                           **ranking_metrics(data.y[indices["test"]], raw_test)})
+    raw_refit_test = model.predict_proba(features.iloc[indices["test"]][cols])[:, 1]
+    test_rows.append({"model": f"{winner} (refit)", "feature_count": len(cols),
+                      **ranking_metrics(data.y[indices["test"]], raw_refit_test)})
     test_df = pd.DataFrame(test_rows).sort_values("pr_auc", ascending=False)
     test_df.to_csv(ROOT / "reports/model_comparison_test.csv", index=False)
 
     p_strategy = calibration.predict(model.predict_proba(features.iloc[indices["strategy_val"]][cols])[:, 1])
-    p_test = calibration.predict(test_predictions[winner])
+    p_test = calibration.predict(raw_refit_test)
     scores = {}
     for split, p in [("strategy_val", p_strategy), ("test", p_test)]:
         ids = indices[split]
@@ -208,9 +214,10 @@ def run(raw: Path, seed: int = 42):
 
     metrics = {"selected_model": winner, "selected_features": len(cols), "seed": seed,
                "selected_policy": min(comparison_val, key=lambda name: comparison_val[name]["cost"]),
-               "strategy_comparison_status": "exploratory_after_initial_test_inspection",
+               "strategy_comparison_status": "iterative_offline_evaluation",
                "test_calibrated": ranking_metrics(data.y[indices["test"]], p_test),
-               "test_raw": ranking_metrics(data.y[indices["test"]], test_predictions[winner]),
+               "test_raw": ranking_metrics(data.y[indices["test"]], raw_refit_test),
+               "refit_train_n": len(refit_ids), "calibration_method": "equal isotonic/sigmoid blend",
                "graph_vs_original_pr_auc_ci": bootstrap_pr_difference(data.y[indices["test"]],
                    test_predictions["M2 LightGBM all graph"], test_predictions["M1 LightGBM original"], seed),
                "default_costs": costs.__dict__, "default_thresholds": thresholds}
@@ -236,7 +243,7 @@ Source: [CARE-GNN data repository](https://github.com/YingtongDou/CARE-GNN). SHA
 
 ## Protocol
 
-Stratified node split, seed {metrics['seed']}: train {quality['split_counts']['train']:,}, model selection {quality['split_counts']['model_val']:,}, calibration {quality['split_counts']['calibration']:,}, strategy selection {quality['split_counts']['strategy_val']:,}, fixed test {quality['split_counts']['test']:,}. The graph setting is **transductive**: features and edges for all nodes are visible, but labels outside the relevant training or validation split are never model inputs. There is no time-based or new-user generalization claim. Model hyperparameters are fixed; winner selected by validation PR-AUC. Isotonic calibration uses the separate calibration split. Thresholds use the separate strategy split. **S4 was added after the first test results had been inspected; its comparison on this fixed test split is exploratory, not a fresh confirmatory test.**
+Stratified node split, seed {metrics['seed']}: train {quality['split_counts']['train']:,}, model selection {quality['split_counts']['model_val']:,}, calibration {quality['split_counts']['calibration']:,}, strategy selection {quality['split_counts']['strategy_val']:,}, fixed test {quality['split_counts']['test']:,}. The graph setting is **transductive**: features and edges for all nodes are visible, but labels outside the relevant training or validation split are never model inputs. There is no time-based or new-user generalization claim. Model hyperparameters are fixed; winner selected by validation PR-AUC, then refitted on train plus model-selection nodes ({metrics['refit_train_n']:,}). The final probabilities average isotonic and logistic calibration, both fitted only on calibration nodes. Thresholds use only the strategy split. The refit and calibration change was developed after earlier results were inspected; the fixed test remains an iterative offline check.
 
 ## Data quality and graph exploration
 
@@ -252,7 +259,7 @@ Validation ranking used for model choice:
 
 {val_df[['model','feature_count','pr_auc','roc_auc','precision_at_5pct','recall_at_5pct']].to_markdown(index=False, floatfmt='.3f')}
 
-Held-out test ranking, raw model outputs:
+Held-out test ranking, raw model outputs. The refit row is the final selected model after adding model-selection nodes to training:
 
 {test_df[['model','pr_auc','roc_auc','precision_at_5pct','recall_at_5pct']].to_markdown(index=False, floatfmt='.3f')}
 
@@ -260,7 +267,7 @@ Selected: **{winner}**. Calibrated test PR-AUC {metrics['test_calibrated']['pr_a
 
 ## Risk decisions and business assumptions
 
-Actions: allow, human review, or block. Base costs are hypothetical: false negative 1, false positive 5, review 0.15, reviewer accuracy 100%, capacity 5% of reviews. Reviewed positives missed and reviewed negatives incorrectly blocked are counted in expectation when reviewer accuracy is below 100%. S1 and S3 cutoffs are optimized on strategy validation; S2 reviews the highest-scored 5%. S4 first chooses the cheaper automatic action for each calibrated score, then assigns reviews to nodes with the largest positive reduction in expected loss, up to the capacity. This exactly optimizes **estimated** additive loss under the stated probability and reviewer assumptions; it does not use labels to assign actions. Cutoffs and the stated cost-based policy choice use strategy-validation labels, not test labels. The policy with lowest strategy-validation cost is **{metrics['selected_policy']}**; see [`strategy_selection.csv`](strategy_selection.csv). Because S4 was added after the original test report, its test performance is exploratory.
+Actions: allow, human review, or block. Base costs are hypothetical: false negative 1, false positive 5, review 0.15, reviewer accuracy 100%, capacity 5% of reviews. Reviewed positives missed and reviewed negatives incorrectly blocked are counted in expectation when reviewer accuracy is below 100%. S1 and S3 cutoffs are optimized on strategy validation; S2 reviews the highest-scored 5%. S4 first chooses the cheaper automatic action for each calibrated score, then assigns reviews to nodes with the largest positive reduction in expected loss, up to the capacity. This exactly optimizes **estimated** additive loss under the stated probability and reviewer assumptions; it does not use labels to assign actions. Cutoffs and the stated cost-based policy choice use strategy-validation labels, not test labels. The policy with lowest strategy-validation cost is **{metrics['selected_policy']}**; see [`strategy_selection.csv`](strategy_selection.csv). Split and reviewer-quality comparisons appear in [`strategy_stability_evaluation.md`](strategy_stability_evaluation.md).
 
 | Policy | Review | Block | Expected recall | Expected FPR | Strategy-val cost / 1,000 | Test cost / 1,000 |
 |:--|--:|--:|--:|--:|--:|--:|
@@ -277,7 +284,7 @@ At the base assumptions, S4 improves test expected recall by {(s4['expected_reca
 
 ## Limits and next step
 
-Yelp filtering labels may be imperfect. Shared graph connections mean node bootstrap intervals may be optimistic. The relation graph includes test-node structure, so results cannot claim performance on unseen users or future events. Costs and reviewer accuracy are illustrative. The separate [`repeated_strategy_evaluation.md`](repeated_strategy_evaluation.md) audits split and reviewer-accuracy sensitivity; it does not supply a prospective test. A real rollout would require independently reviewed labels, prospective time or external splits, reviewer outcome data, and monitored appeals/false blocks before automatic blocking.
+Yelp filtering labels may be imperfect. Shared graph connections mean node bootstrap intervals may be optimistic. The relation graph includes test-node structure, so results cannot claim performance on unseen users or future events. Costs and reviewer accuracy are illustrative. The [`repeated strategy audit`](repeated_strategy_evaluation.md) compares S3 and S4, while the [`stability audit`](strategy_stability_evaluation.md) compares scoring pipelines on paired splits. A real rollout would require independently reviewed labels, prospective time or external splits, reviewer outcome data, and monitored appeals/false blocks before automatic blocking.
 """
     p.write_text(content)
 

@@ -37,6 +37,7 @@ save("03_error_and_strategy.ipynb", [
     nbf.v4.new_code_cell("pd.read_csv(ROOT/'reports/error_cases.csv')"),
     nbf.v4.new_code_cell("comparison = pd.read_csv(ROOT/'reports/strategy_comparison.csv')\ncomparison[['policy','review','block','expected_recall','expected_fpr','cost_per_1000']]"),
     nbf.v4.new_code_cell("sensitivity = pd.read_csv(ROOT/'reports/strategy_sensitivity.csv')\nsensitivity.query('review_accuracy == 0.9 and capacity == 0.05').pivot(index='fp_cost', columns='policy', values='cost_per_1000')"),
+    nbf.v4.new_code_cell("stability = pd.read_csv(ROOT/'reports/strategy_stability_evaluation.csv')\ncheck = stability.query(\"phase == 'fixed_check'\")\ncheck.pivot_table(index=['split_type','review_accuracy'], columns='pipeline', values='cost_per_1000', aggfunc='mean').round(1)"),
     nbf.v4.new_markdown_cell("All cost units are hypothetical. The historical graph and proxy labels cannot establish prospective business impact."),
 ])
 

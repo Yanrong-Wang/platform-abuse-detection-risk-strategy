@@ -30,6 +30,8 @@ def load_outputs():
         "importance": pd.read_csv(report / "feature_importance.csv"),
         "strategy": pd.read_csv(artifacts / "strategy_val_scores.csv"),
         "test": pd.read_csv(artifacts / "test_scores.csv"),
+        "stability": (pd.read_csv(report / "strategy_stability_evaluation.csv")
+                      if (report / "strategy_stability_evaluation.csv").exists() else None),
     }
 
 
@@ -55,7 +57,7 @@ with overview:
 
 with evaluation:
     summary = output["summary"]
-    st.write(f"Selected on model-validation PR-AUC: **{summary['selected_model']}**")
+    st.write(f"Selected on model-validation PR-AUC, then refitted on train plus model-validation nodes: **{summary['selected_model']}**. Final scores average isotonic and logistic calibration.")
     a, b, c = st.columns(3)
     a.metric("Calibrated PR-AUC", f"{summary['test_calibrated']['pr_auc']:.3f}")
     b.metric("ROC-AUC", f"{summary['test_calibrated']['roc_auc']:.3f}")
@@ -69,7 +71,7 @@ with evaluation:
     st.image(str(ROOT / "reports/model_curves.png"), caption="Held-out PR, ROC and reliability curves")
 
 with simulator:
-    st.write("Change the assumptions. S1/S3 thresholds are re-optimized on the **strategy-validation** split; S4 allocates reviews by per-case expected loss. All policies are then evaluated on the **fixed test** split. S4's comparison is exploratory because it was added after initial test inspection.")
+    st.write("Change the assumptions. S1/S3 thresholds are re-optimized on the **strategy-validation** split; S4 allocates reviews by per-case expected loss. All policies are then evaluated on the **fixed test** split using the refit/blend risk scores.")
     left, right = st.columns(2)
     with left:
         capacity = st.slider("Review capacity (% of reviews)", 0, 20, 5, 1) / 100
@@ -89,6 +91,14 @@ with simulator:
     st.dataframe(comparison[["policy", "allow", "review", "block", "expected_recall", "expected_fpr", "cost_per_1000"]].style.format({"expected_recall": "{:.1%}", "expected_fpr": "{:.2%}", "cost_per_1000": "{:.1f}"}), hide_index=True, width="stretch")
     st.plotly_chart(px.bar(comparison, x="policy", y="cost_per_1000", title="Simulated cost per 1,000 reviews"), width="stretch")
     st.caption(f"Chosen cutoffs: S1 = {cuts['s1_threshold']:.3f}; S3 allow < {cuts['s3_low']:.3f}, review below {cuts['s3_high']:.3f}, block at or above it. Review outcomes are expected values at the selected accuracy.")
+    if output["stability"] is not None:
+        st.subheader("Stability across reviewer accuracy")
+        fixed = output["stability"].query("phase == 'fixed_check' and pipeline in ['original_s4', 'refit_blend_s4']")
+        paired = fixed.pivot_table(index=["split_type", "review_accuracy"], columns="pipeline",
+                                   values="cost_per_1000", aggfunc="mean")
+        paired = paired.rename(columns={"original_s4": "Original S4", "refit_blend_s4": "Refit/blend S4"})
+        st.dataframe(paired.style.format("{:.1f}"), width="stretch")
+        st.caption("Mean simulated cost per 1,000 reviews across the fixed-check partitions; both pipelines use the same test nodes within each partition.")
 
 with cases:
     st.write("Only held-out internal node IDs are shown. The dataset has no original review text or personal records.")

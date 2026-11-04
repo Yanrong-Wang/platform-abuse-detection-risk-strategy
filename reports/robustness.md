@@ -2,11 +2,11 @@
 
 ## Class-prior shift
 
-The test samples are importance weighted to target spam prevalences of 5%, 10%, 14.5%, 20%, and 30%, assuming class-conditional score distributions stay fixed. This is a scenario analysis, not observed drift. At 5% prevalence, weighted precision among scores >= 0.5 is 0.612; at 30% it is 0.928. The same fixed cutoff can have very different precision when prevalence changes. See [`prior_shift.csv`](prior_shift.csv).
+The test samples are importance weighted to target spam prevalences of 5%, 10%, 14.5%, 20%, and 30%, assuming class-conditional score distributions stay fixed. This is a scenario analysis, not observed drift. At 5% prevalence, weighted precision among scores >= 0.5 is 0.643; at 30% it is 0.936. The same fixed cutoff can have very different precision when prevalence changes. See [`prior_shift.csv`](prior_shift.csv).
 
 ## Feature perturbation
 
-Independent Gaussian noise at 1% of each original feature's standard deviation was added to every node, then all graph aggregates and held-out scores were recomputed. Mean absolute score movement is 0.019; 95th percentile 0.113; 1.3% of test nodes cross the 0.5 cutoff. PR-AUC changes from 0.875 to 0.846. This is one fixed-seed perturbation, not a reliability guarantee. See [`feature_perturbation.csv`](feature_perturbation.csv).
+Independent Gaussian noise at 1% of each original feature's standard deviation was added to every node, then all graph aggregates and held-out scores were recomputed. Mean absolute score movement is 0.021; 95th percentile 0.121; 1.6% of test nodes cross the 0.5 cutoff. PR-AUC changes from 0.897 to 0.863. This is one fixed-seed perturbation, not a reliability guarantee. See [`feature_perturbation.csv`](feature_perturbation.csv).
 
 ## Monitoring design
 
